@@ -1,0 +1,19 @@
+# Core dependencies
+fastapi==0.104.1
+uvicorn==0.24.0
+python-dotenv==1.0.0
+pydantic==2.5.0
+
+# LLM and AI
+google-generativeai==0.3.2
+
+# PDF processing
+pdfplumber==0.10.3
+PyPDF2==3.0.1
+
+# OCR for scanned PDFs (using OCR.space API like your previous project)
+requests==2.31.0
+
+# Utilities
+python-multipart==0.0.6
+aiofiles==23.2.1
