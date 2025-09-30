@@ -29,13 +29,17 @@ class PDFChatSession:
         self.pdf_processor = get_pdf_processor()
         self.llm_client = get_gemini_client()
         
-        # Session state
-        self.pdf_content = None
-        self.pdf_filename = None
-        self.pdf_info = {}
+        # Session state - EXTENDED for multiple PDFs
+        self.pdfs = {}  # Dictionary: {filename: {content, info, uploaded_at}}
+        self.combined_pdf_content = None  # Combined content for AI
         self.conversation_history = []
         self.created_at = datetime.now()
         self.last_activity = datetime.now()
+
+        # Legacy support (for backward compatibility)
+        self.pdf_content = None
+        self.pdf_filename = None
+        self.pdf_info = {}
         
         # Token monitoring
         self.total_tokens_used = 0
@@ -48,13 +52,14 @@ class PDFChatSession:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         return f"pdf_chat_{timestamp}"
     
-    def load_pdf(self, pdf_path: str) -> bool:
+    def load_pdf(self, pdf_path: str, pdf_name: Optional[str] = None) -> bool:
         """
-        Load and process a PDF file for the session
-        
+        Load and process a PDF file for the session (supports multiple PDFs)
+
         Args:
             pdf_path: Path to the PDF file
-            
+            pdf_name: Optional custom name for the PDF (defaults to filename)
+
         Returns:
             True if PDF loaded successfully, False otherwise
         """
@@ -62,37 +67,125 @@ class PDFChatSession:
             if not os.path.exists(pdf_path):
                 logger.error(f"PDF file not found: {pdf_path}")
                 return False
-            
-            logger.info(f"Loading PDF: {pdf_path}")
-            
+
+            filename = pdf_name or os.path.basename(pdf_path)
+            logger.info(f"Loading PDF: {filename} from {pdf_path}")
+
             # Get PDF information
-            self.pdf_info = self.pdf_processor.get_pdf_info(pdf_path)
-            self.pdf_filename = os.path.basename(pdf_path)
-            
+            pdf_info = self.pdf_processor.get_pdf_info(pdf_path)
+
             # Extract text content
             text, method = self.pdf_processor.extract_text(pdf_path)
-            
+
             if not text:
                 logger.error("Could not extract text from PDF")
                 return False
-            
-            self.pdf_content = text
-            
+
+            # Store PDF in collection
+            self.pdfs[filename] = {
+                'content': text,
+                'info': pdf_info,
+                'method': method,
+                'uploaded_at': datetime.now(),
+                'path': pdf_path
+            }
+
+            # Update legacy fields for backward compatibility
+            if len(self.pdfs) == 1:  # First PDF
+                self.pdf_content = text
+                self.pdf_filename = filename
+                self.pdf_info = pdf_info
+
+            # Rebuild combined content
+            self._rebuild_combined_content()
+
             # Log PDF loading info
             logger.info(f"PDF loaded successfully:")
-            logger.info(f"  - File: {self.pdf_filename}")
-            logger.info(f"  - Size: {self.pdf_info['file_size']:,} bytes")
-            logger.info(f"  - Pages: {self.pdf_info['num_pages']}")
+            logger.info(f"  - File: {filename}")
+            logger.info(f"  - Size: {pdf_info['file_size']:,} bytes")
+            logger.info(f"  - Pages: {pdf_info['num_pages']}")
             logger.info(f"  - Method: {method}")
             logger.info(f"  - Content length: {len(text)} characters")
             logger.info(f"  - Estimated tokens: {self.llm_client.estimate_tokens(text):,}")
-            
+            logger.info(f"  - Total PDFs in session: {len(self.pdfs)}")
+
             return True
-            
+
         except Exception as e:
             logger.error(f"Error loading PDF: {e}")
             return False
-    
+
+    def _rebuild_combined_content(self):
+        """Rebuild combined PDF content for AI processing"""
+        if not self.pdfs:
+            self.combined_pdf_content = None
+            self.pdf_content = None  # Legacy
+            return
+
+        combined_parts = []
+        for i, (filename, pdf_data) in enumerate(self.pdfs.items(), 1):
+            combined_parts.append(f"""
+DOCUMENTO #{i}: {filename}
+===============================================
+📄 Información del documento:
+   - Páginas: {pdf_data['info']['num_pages']}
+   - Método de extracción: {pdf_data['method']}
+   - Fecha de carga: {pdf_data['uploaded_at'].strftime('%Y-%m-%d %H:%M:%S')}
+   - Tamaño: {pdf_data['info']['file_size']:,} bytes
+
+📝 CONTENIDO COMPLETO:
+-----------------------------------------------
+{pdf_data['content']}
+-----------------------------------------------
+FIN DEL DOCUMENTO #{i}: {filename}
+===============================================
+""")
+
+        self.combined_pdf_content = "\n".join(combined_parts)
+
+        # Update legacy field
+        self.pdf_content = self.combined_pdf_content
+
+        logger.info(f"Combined content rebuilt: {len(self.combined_pdf_content)} characters from {len(self.pdfs)} PDFs")
+
+    def get_pdf_list(self) -> List[Dict[str, any]]:
+        """Get list of all PDFs in the session"""
+        pdf_list = []
+        for filename, pdf_data in self.pdfs.items():
+            pdf_list.append({
+                'filename': filename,
+                'pages': pdf_data['info']['num_pages'],
+                'size': pdf_data['info']['file_size'],
+                'method': pdf_data['method'],
+                'uploaded_at': pdf_data['uploaded_at'].isoformat(),
+                'tokens': self.llm_client.estimate_tokens(pdf_data['content'])
+            })
+        return pdf_list
+
+    def remove_pdf(self, filename: str) -> bool:
+        """Remove a specific PDF from the session"""
+        if filename not in self.pdfs:
+            return False
+
+        del self.pdfs[filename]
+        self._rebuild_combined_content()
+
+        # Update legacy fields
+        if self.pdfs:
+            first_pdf = next(iter(self.pdfs.values()))
+            self.pdf_filename = next(iter(self.pdfs.keys()))
+            self.pdf_info = first_pdf['info']
+        else:
+            self.pdf_filename = None
+            self.pdf_info = {}
+
+        logger.info(f"PDF removed: {filename}. Remaining PDFs: {len(self.pdfs)}")
+        return True
+
+    def has_pdfs(self) -> bool:
+        """Check if session has any PDFs loaded"""
+        return len(self.pdfs) > 0
+
     async def chat(self, message: str) -> Dict[str, any]:
         """
         Send a message to the AI with constant PDF injection
@@ -104,10 +197,10 @@ class PDFChatSession:
             Dictionary with response and metadata
         """
         try:
-            if not self.pdf_content:
+            if not self.has_pdfs():
                 return {
                     'success': False,
-                    'error': 'No PDF loaded in this session',
+                    'error': 'No PDFs loaded in this session',
                     'response': None,
                     'token_info': None
                 }
@@ -120,10 +213,10 @@ class PDFChatSession:
                 message, self.pdf_content, self.conversation_history
             )
             
-            # Send message with constant PDF injection
+            # Send message with constant PDF injection (combined content)
             response = await self.llm_client.chat(
                 message=message,
-                pdf_content=self.pdf_content,  # ALWAYS inject PDF
+                pdf_content=self.combined_pdf_content,  # ALWAYS inject combined PDFs
                 conversation_history=self.conversation_history
             )
             
@@ -198,6 +291,11 @@ class PDFChatSession:
             'last_activity': self.last_activity.isoformat(),
             'duration_minutes': duration.total_seconds() / 60,
             'pdf_info': {
+                'pdfs_loaded': len(self.pdfs),
+                'pdf_list': self.get_pdf_list(),
+                'total_content_length': len(self.combined_pdf_content) if self.combined_pdf_content else 0,
+                'total_estimated_tokens': self.llm_client.estimate_tokens(self.combined_pdf_content) if self.combined_pdf_content else 0,
+                # Legacy fields for backward compatibility
                 'filename': self.pdf_filename,
                 'loaded': bool(self.pdf_content),
                 'content_length': len(self.pdf_content) if self.pdf_content else 0,
@@ -233,12 +331,19 @@ class PDFChatSession:
         logger.info(f"Conversation cleared for session: {self.session_id}")
     
     def unload_pdf(self):
-        """Unload PDF and clear all session data"""
+        """Unload all PDFs and clear all session data"""
+        self.pdfs = {}
+        self.combined_pdf_content = None
+        # Legacy fields
         self.pdf_content = None
         self.pdf_filename = None
         self.pdf_info = {}
         self.clear_conversation()
-        logger.info(f"PDF unloaded from session: {self.session_id}")
+        logger.info(f"All PDFs unloaded from session: {self.session_id}")
+
+    def unload_all_pdfs(self):
+        """Alias for unload_pdf for clarity"""
+        self.unload_pdf()
 
 # Global session manager
 active_sessions = {}

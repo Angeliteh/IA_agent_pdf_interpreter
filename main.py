@@ -9,7 +9,8 @@ from typing import Dict, List, Optional
 import uvicorn
 from fastapi import FastAPI, HTTPException, UploadFile, File, Depends, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 
 # Local imports
@@ -141,6 +142,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Mount static files for web interface
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
 # Dependency for session validation
 async def get_valid_session(session_id: str) -> PDFChatSession:
     """Validate and return session"""
@@ -169,9 +173,28 @@ async def get_valid_session(session_id: str) -> PDFChatSession:
     
     return session
 
-# Root endpoint
-@app.get("/", response_model=APIResponse, tags=["system"])
-async def root():
+# Web Interface
+@app.get("/", response_class=FileResponse, tags=["web"])
+async def web_interface():
+    """
+    ## Web Interface
+
+    Serve the enhanced web interface for the PDF Chat Bot.
+    """
+    return FileResponse("static/index_v2.html")
+
+@app.get("/v1", response_class=FileResponse, tags=["web"])
+async def web_interface_v1():
+    """
+    ## Web Interface v1
+
+    Serve the original web interface for the PDF Chat Bot.
+    """
+    return FileResponse("static/index.html")
+
+# API Root endpoint
+@app.get("/api", response_model=APIResponse, tags=["system"])
+async def api_root():
     """
     ## API Root Endpoint
 
@@ -249,7 +272,7 @@ async def health_check():
 
 # Session endpoints
 @app.post("/api/v1/sessions", response_model=SessionResponse, status_code=status.HTTP_201_CREATED, tags=["sessions"])
-async def create_new_session(request: SessionCreate):
+async def create_new_session(request: Optional[SessionCreate] = None):
     """
     ## Create New Chat Session
 
@@ -271,9 +294,10 @@ async def create_new_session(request: SessionCreate):
         
         # Get session info
         summary = session.get_session_summary()
+        session_name = request.session_name if request else None
         session_info = SessionInfo(
             session_id=session.session_id,
-            session_name=request.session_name,
+            session_name=session_name,
             status=SessionStatus.ACTIVE,
             created_at=session.created_at,
             last_activity=session.last_activity,
@@ -566,7 +590,7 @@ async def get_pdf_info(session: PDFChatSession = Depends(get_valid_session)):
             }
         )
 
-@app.delete("/api/v1/sessions/{session_id}/pdf", response_model=APIResponse)
+@app.delete("/api/v1/sessions/{session_id}/pdf", response_model=APIResponse, tags=["pdf"])
 async def remove_pdf(session: PDFChatSession = Depends(get_valid_session)):
     """Remove PDF from a session"""
     try:
@@ -586,6 +610,217 @@ async def remove_pdf(session: PDFChatSession = Depends(get_valid_session)):
         return APIResponse(
             success=True,
             message="PDF removed from session successfully"
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to remove PDF: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "success": False,
+                "message": "Failed to remove PDF",
+                "error_code": ErrorCodes.INTERNAL_ERROR,
+                "details": {"error": str(e)}
+            }
+        )
+
+# Multiple PDFs endpoints
+@app.get("/api/v1/sessions/{session_id}/pdfs", response_model=Dict, tags=["pdf"])
+async def list_pdfs(session: PDFChatSession = Depends(get_valid_session)):
+    """
+    ## List All PDFs in Session
+
+    Get information about all PDFs loaded in the session.
+
+    **Perfect for**: Showing user which documents are loaded
+    """
+    try:
+        pdf_list = session.get_pdf_list()
+
+        return {
+            "success": True,
+            "message": f"Retrieved {len(pdf_list)} PDFs",
+            "pdfs": pdf_list,
+            "total_pdfs": len(pdf_list),
+            "total_tokens": sum(pdf['tokens'] for pdf in pdf_list)
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to list PDFs: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "success": False,
+                "message": "Failed to list PDFs",
+                "error_code": ErrorCodes.INTERNAL_ERROR,
+                "details": {"error": str(e)}
+            }
+        )
+
+@app.post("/api/v1/sessions/{session_id}/pdfs/add", response_model=PDFUploadResponse, tags=["pdf"])
+async def add_pdf_to_session(
+    file: UploadFile = File(...),
+    pdf_name: Optional[str] = None,
+    session: PDFChatSession = Depends(get_valid_session)
+):
+    """
+    ## Add Additional PDF to Session
+
+    Add another PDF to an existing session (supports multiple PDFs).
+
+    **Use Case**: Load related documents into the same conversation
+    **Example**: Load multiple reports, memos, or related documents
+    """
+    try:
+        # Validate file type
+        if not file.filename.lower().endswith('.pdf'):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "success": False,
+                    "message": "Invalid file type. Only PDF files are allowed.",
+                    "error_code": ErrorCodes.INVALID_FILE_TYPE,
+                    "details": {"filename": file.filename}
+                }
+            )
+
+        # Check file size
+        content = await file.read()
+        file_size_mb = len(content) / (1024 * 1024)
+
+        if file_size_mb > config.MAX_PDF_SIZE_MB:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail={
+                    "success": False,
+                    "message": f"File too large. Maximum size is {config.MAX_PDF_SIZE_MB}MB.",
+                    "error_code": ErrorCodes.PDF_TOO_LARGE,
+                    "details": {"file_size_mb": round(file_size_mb, 2)}
+                }
+            )
+
+        # Use custom name or filename
+        display_name = pdf_name or file.filename
+
+        # Check if PDF with same name already exists
+        if display_name in session.pdfs:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "success": False,
+                    "message": f"PDF with name '{display_name}' already exists in session",
+                    "error_code": "PDF_NAME_EXISTS",
+                    "details": {"pdf_name": display_name}
+                }
+            )
+
+        # Save temporary file
+        temp_path = f"/tmp/{session.session_id}_{display_name}"
+        with open(temp_path, "wb") as temp_file:
+            temp_file.write(content)
+
+        # Load PDF into session
+        if not session.load_pdf(temp_path, display_name):
+            # Clean up temp file
+            os.remove(temp_path)
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={
+                    "success": False,
+                    "message": "Failed to process PDF. File may be corrupted or unsupported.",
+                    "error_code": ErrorCodes.PDF_UPLOAD_FAILED,
+                    "details": {"filename": display_name}
+                }
+            )
+
+        # Clean up temp file
+        os.remove(temp_path)
+
+        # Get PDF info
+        pdf_data = session.pdfs[display_name]
+        pdf_info = PDFInfo(
+            filename=display_name,
+            file_size=len(content),
+            num_pages=pdf_data['info']['num_pages'],
+            content_length=len(pdf_data['content']),
+            estimated_tokens=session.llm_client.estimate_tokens(pdf_data['content']),
+            extraction_method=pdf_data['method'],
+            uploaded_at=pdf_data['uploaded_at']
+        )
+
+        logger.info(f"Additional PDF added to session {session.session_id}: {display_name} (Total: {len(session.pdfs)})")
+
+        return PDFUploadResponse(
+            success=True,
+            message=f"PDF added successfully. Session now has {len(session.pdfs)} PDFs.",
+            pdf_info=pdf_info
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"PDF addition failed: {e}")
+        # Clean up temp file if it exists
+        temp_path = f"/tmp/{session.session_id}_{pdf_name or file.filename}"
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "success": False,
+                "message": "PDF addition failed due to internal error",
+                "error_code": ErrorCodes.INTERNAL_ERROR,
+                "details": {"error": str(e)}
+            }
+        )
+
+@app.delete("/api/v1/sessions/{session_id}/pdfs/{pdf_name}", response_model=APIResponse, tags=["pdf"])
+async def remove_specific_pdf(
+    pdf_name: str,
+    session: PDFChatSession = Depends(get_valid_session)
+):
+    """
+    ## Remove Specific PDF from Session
+
+    Remove a specific PDF while keeping others loaded.
+
+    **Use Case**: Remove outdated or irrelevant documents from conversation
+    """
+    try:
+        if not session.remove_pdf(pdf_name):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={
+                    "success": False,
+                    "message": f"PDF '{pdf_name}' not found in session",
+                    "error_code": "PDF_NOT_FOUND",
+                    "details": {"pdf_name": pdf_name}
+                }
+            )
+
+        remaining_count = len(session.pdfs)
+        logger.info(f"PDF '{pdf_name}' removed from session: {session.session_id}. Remaining: {remaining_count}")
+
+        return APIResponse(
+            success=True,
+            message=f"PDF '{pdf_name}' removed successfully. {remaining_count} PDFs remaining."
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to remove PDF: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "success": False,
+                "message": "Failed to remove PDF",
+                "error_code": ErrorCodes.INTERNAL_ERROR,
+                "details": {"error": str(e)}
+            }
         )
 
     except HTTPException:

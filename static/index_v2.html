@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>PDF Chat Bot - Interfaz Mejorada</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles_v2.css">
+</head>
+<body>
+    <!-- Header -->
+    <header class="header">
+        <div class="container">
+            <div class="header-content">
+                <div class="logo">
+                    <i class="fas fa-robot"></i>
+                    <h1>PDF Chat Bot</h1>
+                    <span class="version">v2.0</span>
+                </div>
+                <div class="header-stats">
+                    <div class="stat-item">
+                        <i class="fas fa-comments"></i>
+                        <span id="total-sessions">0</span>
+                        <small>Sesiones</small>
+                    </div>
+                    <div class="stat-item">
+                        <i class="fas fa-file-pdf"></i>
+                        <span id="total-pdfs">0</span>
+                        <small>PDFs</small>
+                    </div>
+                    <div class="stat-item">
+                        <i class="fas fa-coins"></i>
+                        <span id="total-tokens">0</span>
+                        <small>Tokens</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="main">
+        <div class="container">
+            <!-- Session Tabs -->
+            <div class="session-tabs">
+                <div class="tabs-container" id="tabs-container">
+                    <!-- Tabs will be added dynamically -->
+                </div>
+                <button class="new-session-btn" id="new-session-btn">
+                    <i class="fas fa-plus"></i>
+                    <span>Nueva Sesión</span>
+                </button>
+            </div>
+
+            <!-- Chat Interface -->
+            <div class="chat-interface" id="chat-interface">
+                <!-- Welcome Screen -->
+                <div class="welcome-screen" id="welcome-screen">
+                    <div class="welcome-content">
+                        <div class="welcome-icon">
+                            <i class="fas fa-robot"></i>
+                        </div>
+                        <h2>¡Bienvenido al PDF Chat Bot!</h2>
+                        <p>Crea una nueva sesión para comenzar a chatear con tus documentos PDF.</p>
+                        <button class="btn btn-primary" onclick="app.createNewSession()">
+                            <i class="fas fa-plus"></i>
+                            Crear Primera Sesión
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Session Content (Hidden initially) -->
+                <div class="session-content" id="session-content" style="display: none;">
+                    <div class="chat-layout">
+                        <!-- PDF Panel -->
+                        <aside class="pdf-panel">
+                            <div class="panel-header">
+                                <h3><i class="fas fa-file-pdf"></i> Documentos</h3>
+                                <span class="pdf-counter" id="current-pdf-count">0 PDFs</span>
+                            </div>
+
+                            <!-- Upload Area -->
+                            <div class="upload-zone" id="upload-zone">
+                                <div class="upload-content">
+                                    <i class="fas fa-cloud-upload-alt"></i>
+                                    <p>Arrastra PDFs aquí</p>
+                                    <button class="upload-btn" id="upload-btn">
+                                        <i class="fas fa-folder-open"></i>
+                                        Seleccionar Archivos
+                                    </button>
+                                    <small>Máximo 10MB por archivo</small>
+                                </div>
+                                <input type="file" id="file-input" accept=".pdf" multiple hidden>
+                            </div>
+
+                            <!-- PDF List -->
+                            <div class="pdf-list-container">
+                                <div class="pdf-list" id="pdf-list">
+                                    <div class="empty-pdfs" id="empty-pdfs">
+                                        <i class="fas fa-inbox"></i>
+                                        <p>No hay PDFs en esta sesión</p>
+                                        <small>Sube documentos para comenzar</small>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Session Info -->
+                            <div class="session-info">
+                                <div class="info-item">
+                                    <small>ID de Sesión:</small>
+                                    <code id="current-session-id">-</code>
+                                </div>
+                                <div class="info-item">
+                                    <small>Estado:</small>
+                                    <span class="status-badge" id="session-status">
+                                        <span class="status-dot"></span>
+                                        Conectado
+                                    </span>
+                                </div>
+                            </div>
+                        </aside>
+
+                        <!-- Chat Area -->
+                        <section class="chat-area">
+                            <!-- Chat Header -->
+                            <div class="chat-header">
+                                <div class="chat-title">
+                                    <h3 id="chat-title">Conversación</h3>
+                                    <small id="chat-subtitle">Sube PDFs para comenzar</small>
+                                </div>
+                                <div class="chat-actions">
+                                    <button class="btn btn-ghost btn-sm" id="clear-chat-btn" disabled>
+                                        <i class="fas fa-trash"></i>
+                                    </button>
+                                    <button class="btn btn-ghost btn-sm" id="export-chat-btn" disabled>
+                                        <i class="fas fa-download"></i>
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- Messages -->
+                            <div class="messages-container" id="messages-container">
+                                <div class="chat-welcome">
+                                    <div class="bot-avatar">
+                                        <i class="fas fa-robot"></i>
+                                    </div>
+                                    <div class="welcome-message">
+                                        <h4>¡Hola! 👋</h4>
+                                        <p>Soy tu asistente para documentos PDF. Para comenzar:</p>
+                                        <ol>
+                                            <li>📄 Sube uno o más PDFs en el panel izquierdo</li>
+                                            <li>💬 Hazme preguntas sobre el contenido</li>
+                                            <li>🎯 Obtén resúmenes y análisis claros</li>
+                                        </ol>
+                                        <p><strong>¡Estoy listo para ayudarte!</strong></p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Input Area -->
+                            <div class="input-area">
+                                <div class="input-container">
+                                    <textarea 
+                                        id="message-input" 
+                                        placeholder="Escribe tu pregunta sobre los PDFs..."
+                                        rows="1"
+                                        disabled
+                                    ></textarea>
+                                    <button class="send-btn" id="send-btn" disabled>
+                                        <i class="fas fa-paper-plane"></i>
+                                    </button>
+                                </div>
+                                <div class="input-footer">
+                                    <div class="input-status">
+                                        <span id="input-status">Sube al menos un PDF para comenzar</span>
+                                    </div>
+                                    <div class="token-estimate">
+                                        <span id="token-estimate">0 tokens</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </section>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Loading Overlay -->
+    <div class="loading-overlay" id="loading-overlay">
+        <div class="loading-content">
+            <div class="spinner"></div>
+            <p id="loading-text">Procesando...</p>
+        </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div class="toast-container" id="toast-container"></div>
+
+    <!-- Modals -->
+    <div class="modal" id="session-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Nueva Sesión</h3>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="session-name">Nombre de la sesión (opcional):</label>
+                    <input type="text" id="session-name" placeholder="Ej: Análisis de contratos, Revisión de informes...">
+                </div>
+                <div class="form-group">
+                    <label>¿Qué tipo de documentos vas a analizar?</label>
+                    <div class="session-types">
+                        <button class="session-type-btn" data-type="general">
+                            <i class="fas fa-file-alt"></i>
+                            <span>Documentos Generales</span>
+                        </button>
+                        <button class="session-type-btn" data-type="legal">
+                            <i class="fas fa-balance-scale"></i>
+                            <span>Documentos Legales</span>
+                        </button>
+                        <button class="session-type-btn" data-type="technical">
+                            <i class="fas fa-cogs"></i>
+                            <span>Documentos Técnicos</span>
+                        </button>
+                        <button class="session-type-btn" data-type="academic">
+                            <i class="fas fa-graduation-cap"></i>
+                            <span>Documentos Académicos</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="app.closeModal()">Cancelar</button>
+                <button class="btn btn-primary" id="create-session-btn">
+                    <i class="fas fa-plus"></i>
+                    Crear Sesión
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal" id="pdf-details-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Detalles del PDF</h3>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body" id="pdf-details-content">
+                <!-- Content loaded dynamically -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="app_v2.js"></script>
+</body>
+</html>

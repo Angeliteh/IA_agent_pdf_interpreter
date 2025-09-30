@@ -39,32 +39,54 @@ class GeminiClient:
     
     def get_system_prompt(self, pdf_content: Optional[str] = None) -> str:
         """
-        Generate the system prompt based on the requirements
+        Generate the system prompt based on the requirements (supports multiple PDFs)
         """
-        base_prompt = """Recibirás documentos PDF con información formal. Tu tarea es resumir y explicar el contenido en lenguaje claro, simple y humano. 
+        base_prompt = """Recibirás uno o más documentos PDF con información formal. Tu tarea es resumir y explicar el contenido en lenguaje claro, simple y humano.
 
-Prioriza lo esencial y lo práctico, como si hablaras con alguien ocupado que no tiene tiempo de leer todo el documento. 
+Prioriza lo esencial y lo práctico, como si hablaras con alguien ocupado que no tiene tiempo de leer todo el documento.
 
-Evita tecnicismos innecesarios y responde de forma concisa y comprensible. 
+Evita tecnicismos innecesarios y responde de forma concisa y comprensible.
 
-También debes responder preguntas específicas sobre el contenido del documento.
+También debes responder preguntas específicas sobre el contenido de los documentos.
 
 Características de tus respuestas:
 - Lenguaje claro y directo
 - Resúmenes concisos pero completos
 - Explicaciones como si hablaras con alguien ocupado
-- Respuestas específicas cuando te pregunten sobre el documento"""
+- Respuestas específicas cuando te pregunten sobre los documentos
+- Si hay múltiples documentos, especifica de cuál estás hablando cuando sea relevante"""
 
         if pdf_content:
-            return f"""{base_prompt}
+            # Detect if it's multiple PDFs by looking for "DOCUMENTO #" markers
+            is_multiple_pdfs = pdf_content.count("DOCUMENTO #") > 1
 
-CONTENIDO DEL DOCUMENTO PDF:
----
+            if is_multiple_pdfs:
+                return f"""{base_prompt}
+
+DOCUMENTOS PDF CARGADOS:
+========================
 {pdf_content}
----
+========================
+
+INSTRUCCIONES ESPECIALES:
+- Tienes acceso a MÚLTIPLES documentos PDF
+- Cada documento está claramente separado con su nombre y contenido
+- Cuando respondas, puedes hacer referencia a información de cualquiera de los documentos
+- Si la pregunta se refiere a un documento específico, menciona cuál
+- Si la información está en varios documentos, puedes combinarla en tu respuesta
+- Para resúmenes generales, incluye información relevante de todos los documentos
+
+Ahora puedes responder preguntas sobre estos documentos o proporcionar resúmenes si te lo solicitan."""
+            else:
+                return f"""{base_prompt}
+
+DOCUMENTO PDF CARGADO:
+=====================
+{pdf_content}
+=====================
 
 Ahora puedes responder preguntas sobre este documento o proporcionar un resumen si te lo solicitan."""
-        
+
         return base_prompt
     
     def estimate_tokens(self, text: str) -> int:
